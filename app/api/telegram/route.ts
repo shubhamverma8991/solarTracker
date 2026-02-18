@@ -128,20 +128,36 @@ export async function POST(request: NextRequest) {
       smart_meter_imported: smartMeterImported,
     }
 
-    const { error } = await supabase
+    // Try to insert/update the reading
+    // Using upsert with date as conflict resolution
+    const { error, data } = await supabase
       .from('daily_readings')
       .upsert(reading, {
         onConflict: 'date',
+        ignoreDuplicates: false, // Update if exists
       })
+      .select()
 
     if (error) {
       console.error('Supabase error:', error)
-      await sendTelegramMessage(
-        chatId,
-        '❌ Error saving data. Please try again later.'
-      )
+      console.error('Error details:', JSON.stringify(error, null, 2))
+      console.error('Reading data:', reading)
+      
+      // Send more detailed error message for debugging
+      let errorMsg = '❌ Error saving data.\n\n'
+      
+      // Check common issues
+      if (error.code === 'PGRST116' || error.message?.includes('relation') || error.message?.includes('table')) {
+        errorMsg += '⚠️ Database table not found. Please run database.sql in Supabase.'
+      } else if (error.code === '42501' || error.message?.includes('permission') || error.message?.includes('RLS')) {
+        errorMsg += '⚠️ Permission denied. Check RLS policies or service role key.'
+      } else {
+        errorMsg += `Error: ${error.message || 'Unknown error'}`
+      }
+      
+      await sendTelegramMessage(chatId, errorMsg)
       return NextResponse.json(
-        { error: 'Database error' },
+        { error: 'Database error', details: error },
         { status: 500 }
       )
     }
