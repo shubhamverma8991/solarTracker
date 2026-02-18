@@ -34,6 +34,9 @@ ALTER TABLE daily_readings ENABLE ROW LEVEL SECURITY;
 
 -- Insert initial base readings
 -- These are the starting values from which all calculations begin
+-- Delete any existing base readings first to ensure only one exists
+DELETE FROM base_readings;
+
 INSERT INTO base_readings (
   solar_inverter_reading,
   solar_meter_reading,
@@ -44,4 +47,4 @@ INSERT INTO base_readings (
   29631.5,     -- Solar Meter Reading (initial)
   0,           -- Smart Meter Export (initial)
   4057.04      -- Smart Meter Imported (initial)
-) ON CONFLICT DO NOTHING;
+);

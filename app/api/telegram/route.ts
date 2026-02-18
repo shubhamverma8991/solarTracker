@@ -174,11 +174,14 @@ export async function POST(request: NextRequest) {
       .eq('date', previousDayStr)
       .single()
 
-    // Get base readings
-    const { data: baseReading } = await supabase
+    // Get base readings - get the first one if multiple exist
+    const { data: baseReadings } = await supabase
       .from('base_readings')
       .select('*')
-      .single()
+      .order('created_at', { ascending: true })
+      .limit(1)
+    
+    const baseReading = baseReadings && baseReadings.length > 0 ? baseReadings[0] : null
 
     // Calculate daily differences
     let dailySolar = 0

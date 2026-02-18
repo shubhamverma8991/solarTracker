@@ -4,15 +4,24 @@ import { MonthlyStats } from '@/types'
 async function getMonthlyStats(): Promise<MonthlyStats> {
   const supabase = createServerClient()
 
-  // Get base readings (starting point)
-  const { data: baseReading, error: baseError } = await supabase
+  // Get base readings (starting point) - get the first one if multiple exist
+  const { data: baseReadings, error: baseError } = await supabase
     .from('base_readings')
     .select('*')
-    .single()
+    .order('created_at', { ascending: true })
+    .limit(1)
+
+  // Use default values if base readings not found, otherwise use the first one
+  const baseReading = baseReadings && baseReadings.length > 0 
+    ? baseReadings[0]
+    : {
+        solar_inverter_reading: 0,
+        smart_meter_export: 0,
+        smart_meter_imported: 0,
+      }
 
   if (baseError) {
     console.error('Error fetching base readings:', baseError)
-    throw new Error('Failed to fetch base readings')
   }
 
   // Get current month's start and end dates
