@@ -1,7 +1,7 @@
 // Quick script to get your Telegram Chat ID
 // Run: node get-chat-id.js
 
-const BOT_TOKEN = '8114616050:AAGL99qPhv7YCU1YV-Gb1Mtu2NJfbnfgtYo'
+
 
 async function getChatId() {
   try {

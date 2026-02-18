@@ -4,7 +4,6 @@
 
 Based on your Supabase project:
 
-- **Project URL:** `https://tdqxyxsuyeyiumbvqxzq.supabase.co`
 
 **Security note:** don’t store your database password, service role key, or Telegram bot token in repo files. Put them only in `.env.local` (local) and in Vercel Environment Variables (prod).
 
@@ -19,20 +18,17 @@ Based on your Supabase project:
 2. **Create `.env.local` file** (copy from `env.example`):
 
    ```env
-   NEXT_PUBLIC_SUPABASE_URL=https://tdqxyxsuyeyiumbvqxzq.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-from-supabase-settings
-   TELEGRAM_BOT_TOKEN=your-telegram-bot-token
-   TELEGRAM_CHAT_ID=your-telegram-chat-id
+
    ```
 
 3. **Get your Supabase keys:**
 
-   - Go to: `https://supabase.com/dashboard/project/tdqxyxsuyeyiumbvqxzq/settings/api`
+  
    - Copy the `service_role` key (secret!) → `SUPABASE_SERVICE_ROLE_KEY`
 
 4. **Run database SQL:**
 
-   - Go to: `https://supabase.com/dashboard/project/tdqxyxsuyeyiumbvqxzq/sql/new`
+  
    - Copy contents of `database.sql`
    - Paste and click "Run"
 
