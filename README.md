@@ -133,19 +133,33 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ### Sending Data via Telegram
 
-Send a message to your Telegram bot in this format:
+Send a message to your Telegram bot in one of these formats:
 
+**Format 1 (uses today's date):**
 ```
-18.5 12.3 6.2 5821
+18.5 29650.2 6.2 4060.5
+```
+
+**Format 2 (specify date - overwrites if date exists):**
+```
+2024-01-15 18.5 29650.2 6.2 4060.5
 ```
 
 Where:
-- `18.5` = Solar Generation (kWh)
-- `12.3` = Smart Import (kWh)
-- `6.2` = Smart Export (kWh)
-- `5821` = Solar Meter Total (kWh)
+- `2024-01-15` = Date in YYYY-MM-DD format (optional, defaults to today)
+- `18.5` = Solar Inverter Reading (cumulative kWh)
+- `29650.2` = Solar Meter Reading (cumulative kWh)
+- `6.2` = Smart Meter Export (cumulative kWh)
+- `4060.5` = Smart Meter Imported (cumulative kWh)
+
+**Note:** 
+- These are cumulative meter readings, not daily values. The system calculates daily differences automatically.
+- If you send data for the same date twice, it will overwrite the previous entry.
 
 The bot will respond with a confirmation message showing:
+- Daily Solar Generated
+- Daily Export
+- Daily Import
 - Net Usage
 - Total Consumption
 

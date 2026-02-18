@@ -42,19 +42,67 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true }) // Ignore non-text messages
     }
 
-    // Parse the message format: "solar_inverter_reading solar_meter_reading smart_meter_export smart_meter_imported"
+    // Parse the message format: 
+    // Option 1: "solar_inverter solar_meter smart_export smart_import" (uses today's date)
+    // Option 2: "YYYY-MM-DD solar_inverter solar_meter smart_export smart_import" (uses specified date)
     const parts = messageText.trim().split(/\s+/)
-    if (parts.length !== 4) {
-      // Send error message back to Telegram
+    
+    let targetDate: string
+    let solarInverterReading: number
+    let solarMeterReading: number
+    let smartMeterExport: number
+    let smartMeterImported: number
+
+    if (parts.length === 4) {
+      // Format: solar_inverter solar_meter smart_export smart_import (uses today)
+      targetDate = new Date().toISOString().split('T')[0]
+      const [solarInverter, solarMeter, smartExport, smartImported] = parts.map(
+        (val) => parseFloat(val)
+      )
+      solarInverterReading = solarInverter
+      solarMeterReading = solarMeter
+      smartMeterExport = smartExport
+      smartMeterImported = smartImported
+    } else if (parts.length === 5) {
+      // Format: YYYY-MM-DD solar_inverter solar_meter smart_export smart_import
+      const dateStr = parts[0]
+      const [solarInverter, solarMeter, smartExport, smartImported] = parts
+        .slice(1)
+        .map((val) => parseFloat(val))
+
+      // Validate date format (YYYY-MM-DD)
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/
+      if (!dateRegex.test(dateStr)) {
+        await sendTelegramMessage(
+          chatId,
+          '❌ Invalid date format. Use YYYY-MM-DD\n\nExample: 2024-01-15 18.5 29650.2 6.2 4060.5'
+        )
+        return NextResponse.json({ ok: true })
+      }
+
+      // Validate date is valid
+      const parsedDate = new Date(dateStr)
+      if (isNaN(parsedDate.getTime())) {
+        await sendTelegramMessage(
+          chatId,
+          '❌ Invalid date. Please use a valid date in YYYY-MM-DD format.'
+        )
+        return NextResponse.json({ ok: true })
+      }
+
+      targetDate = dateStr
+      solarInverterReading = solarInverter
+      solarMeterReading = solarMeter
+      smartMeterExport = smartExport
+      smartMeterImported = smartImported
+    } else {
+      // Invalid format
       await sendTelegramMessage(
         chatId,
-        '❌ Invalid format. Expected: solar_inverter solar_meter smart_export smart_import\n\nExample: 18.5 29650.2 6.2 4060.5'
+        '❌ Invalid format.\n\nFormat 1 (today): solar_inverter solar_meter smart_export smart_import\nExample: 18.5 29650.2 6.2 4060.5\n\nFormat 2 (with date): YYYY-MM-DD solar_inverter solar_meter smart_export smart_import\nExample: 2024-01-15 18.5 29650.2 6.2 4060.5'
       )
       return NextResponse.json({ ok: true })
     }
-
-    const [solarInverterReading, solarMeterReading, smartMeterExport, smartMeterImported] =
-      parts.map((val) => parseFloat(val))
 
     // Validate parsed values
     if (
@@ -70,13 +118,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true })
     }
 
-    // Get today's date
-    const today = new Date().toISOString().split('T')[0]
-
-    // Insert into Supabase
+    // Insert into Supabase (will overwrite if date already exists)
     const supabase = createServerClient()
     const reading: DailyReadingInsert = {
-      date: today,
+      date: targetDate,
       solar_inverter_reading: solarInverterReading,
       solar_meter_reading: solarMeterReading,
       smart_meter_export: smartMeterExport,
@@ -102,14 +147,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Get previous day's reading to calculate daily differences
-    const yesterday = new Date()
-    yesterday.setDate(yesterday.getDate() - 1)
-    const yesterdayStr = yesterday.toISOString().split('T')[0]
+    const targetDateObj = new Date(targetDate)
+    const previousDay = new Date(targetDateObj)
+    previousDay.setDate(previousDay.getDate() - 1)
+    const previousDayStr = previousDay.toISOString().split('T')[0]
 
     const { data: previousReading } = await supabase
       .from('daily_readings')
       .select('*')
-      .eq('date', yesterdayStr)
+      .eq('date', previousDayStr)
       .single()
 
     // Get base readings
@@ -147,16 +193,19 @@ export async function POST(request: NextRequest) {
     const totalConsumption = dailyImport + selfConsumed
 
     // Send confirmation message
+    const dateDisplay = targetDate === new Date().toISOString().split('T')[0] ? "Today's" : `Date: ${targetDate}`
     const confirmationMessage = `Saved ✅
 
-📊 Today's Readings:
+📅 ${dateDisplay} Readings:
 Solar Generated: ${dailySolar.toFixed(2)} kWh
 Exported: ${dailyExport.toFixed(2)} kWh
 Imported: ${dailyImport.toFixed(2)} kWh
 
 💡 Calculations:
 Net Usage: ${netUsage.toFixed(2)} kWh
-Total Consumption: ${totalConsumption.toFixed(2)} kWh`
+Total Consumption: ${totalConsumption.toFixed(2)} kWh
+
+${targetDate !== new Date().toISOString().split('T')[0] ? '⚠️ Note: Data overwritten for this date' : ''}`
 
     await sendTelegramMessage(chatId, confirmationMessage)
 

@@ -26,13 +26,18 @@ export default function HomePage() {
               <li className="flex items-start gap-3">
                 <span className="text-blue-400">1.</span>
                 <span>
-                  Send daily readings via Telegram bot in the format:{' '}
-                  <code className="bg-gray-700 px-2 py-1 rounded">
+                  Send daily readings via Telegram bot:
+                  <br />
+                  <code className="bg-gray-700 px-2 py-1 rounded mt-2 inline-block">
                     solar_inverter solar_meter smart_export smart_import
                   </code>
                   <br />
                   <span className="text-sm text-gray-400 ml-6">
-                    Example: 18.5 29650.2 6.2 4060.5
+                    Example: 18.5 29650.2 6.2 4060.5 (uses today)
+                  </span>
+                  <br />
+                  <span className="text-sm text-gray-400 ml-6 mt-1">
+                    Or with date: 2024-01-15 18.5 29650.2 6.2 4060.5
                   </span>
                 </span>
               </li>
