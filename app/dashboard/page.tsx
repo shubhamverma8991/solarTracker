@@ -1,242 +1,217 @@
-import { createServerClient } from '@/lib/supabase'
-import { MonthlyStats } from '@/types'
+// app/dashboard/page.tsx
 
-async function getMonthlyStats(): Promise<MonthlyStats> {
+import { createServerClient } from '@/lib/supabase'
+import DateFilter from './date-filter.client'
+import SolarChart from './solar-chart.client'
+import ImportExportChart from './import-export-chart.client'
+import Link from 'next/link'
+
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
+type Stats = {
+  totalSolar: number
+  totalImport: number
+  totalExport: number
+  netUsage: number
+  totalConsumption: number
+}
+
+async function getStats(startDate: string, endDate: string) {
   const supabase = createServerClient()
 
-  // Get base readings (starting point) - get the first one if multiple exist
-  const { data: baseReadings, error: baseError } = await supabase
+  const { data: baseReading } = await supabase
     .from('base_readings')
     .select('*')
     .order('created_at', { ascending: true })
     .limit(1)
+    .single()
 
-  // Use default values if base readings not found, otherwise use the first one
-  const baseReading = baseReadings && baseReadings.length > 0 
-    ? baseReadings[0]
-    : {
-        solar_inverter_reading: 0,
-        smart_meter_export: 0,
-        smart_meter_imported: 0,
-      }
-
-  if (baseError) {
-    console.error('Error fetching base readings:', baseError)
+  const base = baseReading ?? {
+    smart_meter_export: 0,
+    smart_meter_imported: 0,
   }
 
-  // Get current month's start and end dates
-  const now = new Date()
-  const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
-  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-
-  const startDate = firstDay.toISOString().split('T')[0]
-  const endDate = lastDay.toISOString().split('T')[0]
-
-  // Fetch readings for current month
-  const { data: readings, error } = await supabase
+  const { data: rangeRows } = await supabase
     .from('daily_readings')
     .select('*')
     .gte('date', startDate)
     .lte('date', endDate)
     .order('date', { ascending: true })
 
-  if (error) {
-    console.error('Error fetching data:', error)
-    throw new Error('Failed to fetch data')
-  }
+  const rows = rangeRows ?? []
 
-  if (!readings || readings.length === 0) {
-    return {
-      totalSolar: 0,
-      totalImport: 0,
-      totalExport: 0,
-      netUsage: 0,
-      totalConsumption: 0,
-    }
-  }
+  // ✅ Solar total (daily sum)
+  const totalSolar = rows.reduce(
+    (acc, r) => acc + Number(r.solar_inverter_reading ?? 0),
+    0
+  )
 
-  // Get previous month's last reading if exists
-  const prevMonthLastDay = new Date(firstDay)
-  prevMonthLastDay.setDate(prevMonthLastDay.getDate() - 1)
-  const prevMonthDate = prevMonthLastDay.toISOString().split('T')[0]
-
-  const { data: prevMonthReading } = await supabase
+  // ✅ Cumulative difference logic (for totals)
+  const { data: lastReading } = await supabase
     .from('daily_readings')
     .select('*')
-    .eq('date', prevMonthDate)
+    .lte('date', endDate)
+    .order('date', { ascending: false })
+    .limit(1)
     .single()
 
-  // Calculate daily differences and sum them up
-  let totalSolar = 0
-  let totalImport = 0
-  let totalExport = 0
-
-  for (let index = 0; index < readings.length; index++) {
-    const reading = readings[index]
-    const solarInverter = Number(reading.solar_inverter_reading) || 0
-    const smartExport = Number(reading.smart_meter_export) || 0
-    const smartImported = Number(reading.smart_meter_imported) || 0
-
-    let previousSolar = 0
-    let previousExport = 0
-    let previousImport = 0
-
-    if (index === 0) {
-      // First reading of the month - compare with previous month's last reading or base
-      if (prevMonthReading) {
-        previousSolar = Number(prevMonthReading.solar_inverter_reading) || 0
-        previousExport = Number(prevMonthReading.smart_meter_export) || 0
-        previousImport = Number(prevMonthReading.smart_meter_imported) || 0
-      } else if (baseReading) {
-        previousSolar = Number(baseReading.solar_inverter_reading) || 0
-        previousExport = Number(baseReading.smart_meter_export) || 0
-        previousImport = Number(baseReading.smart_meter_imported) || 0
-      }
-    } else {
-      // Compare with previous day in the same month
-      const prevReading = readings[index - 1]
-      previousSolar = Number(prevReading.solar_inverter_reading) || 0
-      previousExport = Number(prevReading.smart_meter_export) || 0
-      previousImport = Number(prevReading.smart_meter_imported) || 0
+  if (!lastReading) {
+    return {
+      stats: {
+        totalSolar: 0,
+        totalImport: 0,
+        totalExport: 0,
+        netUsage: 0,
+        totalConsumption: 0,
+      },
+      dailyChartData: [],
     }
-
-    // Calculate daily differences (ensure non-negative)
-    const dailySolar = Math.max(0, solarInverter - previousSolar)
-    const dailyExport = Math.max(0, smartExport - previousExport)
-    const dailyImport = Math.max(0, smartImported - previousImport)
-
-    totalSolar += dailySolar
-    totalExport += dailyExport
-    totalImport += dailyImport
   }
 
-  // Calculate derived metrics
-  const netUsage = totalImport - totalExport
-  const selfConsumed = totalSolar - totalExport
-  const totalConsumption = totalImport + selfConsumed
+  const { data: previousReading } = await supabase
+    .from('daily_readings')
+    .select('*')
+    .lt('date', startDate)
+    .order('date', { ascending: false })
+    .limit(1)
+    .single()
+
+  const reference = previousReading ?? base
+
+  const totalExport =
+    Number(lastReading.smart_meter_export ?? 0) -
+    Number(reference.smart_meter_export ?? 0)
+
+  const totalImport =
+    Number(lastReading.smart_meter_imported ?? 0) -
+    Number(reference.smart_meter_imported ?? 0)
+
+  const safeExport = Math.max(0, totalExport)
+  const safeImport = Math.max(0, totalImport)
+
+  const netUsage = safeImport - safeExport
+  const selfConsumed = Math.max(0, totalSolar - safeExport)
+  const totalConsumption = safeImport + selfConsumed
+
+  // ✅ Convert cumulative → daily delta (FOR CHARTS)
+  const dailyChartData = rows.map((row, index) => {
+    const prev = index === 0 ? null : rows[index - 1]
+
+    const dailyImport = prev
+      ? Number(row.smart_meter_imported) -
+      Number(prev.smart_meter_imported)
+      : 0
+
+    const dailyExport = prev
+      ? Number(row.smart_meter_export) -
+      Number(prev.smart_meter_export)
+      : 0
+
+    const solar = Number(row.solar_inverter_reading ?? 0)
+
+    const safeImport = Math.max(0, dailyImport)
+    const safeExport = Math.max(0, dailyExport)
+
+    const selfConsumed = Math.max(0, solar - safeExport)
+
+    const used = safeImport + selfConsumed
+
+    return {
+      date: row.date.slice(5),
+      solar,
+      import: safeImport,
+      export: safeExport,
+      used,
+    }
+  })
 
   return {
-    totalSolar,
-    totalImport,
-    totalExport,
-    netUsage,
-    totalConsumption,
+    stats: {
+      totalSolar: Number(totalSolar.toFixed(2)),
+      totalImport: Number(safeImport.toFixed(2)),
+      totalExport: Number(safeExport.toFixed(2)),
+      netUsage: Number(netUsage.toFixed(2)),
+      totalConsumption: Number(totalConsumption.toFixed(2)),
+    },
+    dailyChartData,
   }
 }
 
-export default async function DashboardPage() {
-  let stats: MonthlyStats
-  let error: string | null = null
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams?: { start?: string; end?: string }
+}) {
+  const today = new Date()
 
-  try {
-    stats = await getMonthlyStats()
-  } catch (e) {
-    error = 'Failed to load dashboard data'
-    stats = {
-      totalSolar: 0,
-      totalImport: 0,
-      totalExport: 0,
-      netUsage: 0,
-      totalConsumption: 0,
-    }
-  }
+  const defaultStart = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    1
+  )
+    .toISOString()
+    .split('T')[0]
 
-  const currentMonth = new Date().toLocaleString('default', {
-    month: 'long',
-    year: 'numeric',
-  })
+  const defaultEnd = today.toISOString().split('T')[0]
+
+  const startDate = searchParams?.start ?? defaultStart
+  const endDate = searchParams?.end ?? defaultEnd
+
+  const { stats, dailyChartData } =
+    await getStats(startDate, endDate)
 
   const cards = [
-    {
-      title: 'Total Solar Generation',
-      value: stats.totalSolar.toFixed(2),
-      unit: 'kWh',
-      color: 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400',
-      icon: '☀️',
-    },
-    {
-      title: 'Total Import',
-      value: stats.totalImport.toFixed(2),
-      unit: 'kWh',
-      color: 'bg-blue-500/10 border-blue-500/20 text-blue-400',
-      icon: '⬇️',
-    },
-    {
-      title: 'Total Export',
-      value: stats.totalExport.toFixed(2),
-      unit: 'kWh',
-      color: 'bg-green-500/10 border-green-500/20 text-green-400',
-      icon: '⬆️',
-    },
-    {
-      title: 'Net Usage',
-      value: stats.netUsage.toFixed(2),
-      unit: 'kWh',
-      color: 'bg-purple-500/10 border-purple-500/20 text-purple-400',
-      icon: '📊',
-    },
-    {
-      title: 'Total Consumption',
-      value: stats.totalConsumption.toFixed(2),
-      unit: 'kWh',
-      color: 'bg-orange-500/10 border-orange-500/20 text-orange-400',
-      icon: '🔌',
-    },
+    { title: 'Solar', value: stats.totalSolar, icon: '☀️' },
+    { title: 'Import', value: stats.totalImport, icon: '⬇️' },
+    { title: 'Export', value: stats.totalExport, icon: '⬆️' },
+    { title: 'Net', value: stats.netUsage, icon: '📊' },
+    { title: 'Consumption', value: stats.totalConsumption, icon: '🔌' },
   ]
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100">
       <div className="container mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2">Solar Monitoring Dashboard</h1>
-          <p className="text-gray-400">Statistics for {currentMonth}</p>
+
+        <h1 className="text-4xl font-bold mb-6">
+          Solar Monitoring Dashboard
+        </h1>
+
+        <div className="mb-10 flex justify-end">
+          <Link href="/dashboard/data">
+            <button className="bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded">
+              View Full Data
+            </button>
+          </Link>
         </div>
 
-        {error && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400">
-            {error}
-          </div>
-        )}
+        <DateFilter defaultStart={startDate} defaultEnd={endDate} />
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {/* Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
           {cards.map((card) => (
-            <div
-              key={card.title}
-              className={`p-6 rounded-lg border ${card.color} backdrop-blur-sm`}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold">{card.title}</h2>
-                <span className="text-2xl">{card.icon}</span>
+            <div key={card.title} className="p-6 rounded-lg border bg-gray-800 border-gray-700">
+              <div className="flex justify-between mb-3">
+                <h2>{card.title}</h2>
+                <span>{card.icon}</span>
               </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold">{card.value}</span>
-                <span className="text-gray-400">{card.unit}</span>
+              <div className="text-3xl font-bold">
+                {card.value.toFixed(2)} kWh
               </div>
             </div>
           ))}
         </div>
 
-        <div className="mt-8 p-6 bg-gray-800/50 rounded-lg border border-gray-700">
-          <h3 className="text-xl font-semibold mb-4">Calculation Details</h3>
-          <div className="space-y-2 text-sm text-gray-300">
-            <p>
-              <strong>Net Usage:</strong> Total Import - Total Export ={' '}
-              {stats.totalImport.toFixed(2)} - {stats.totalExport.toFixed(2)} ={' '}
-              {stats.netUsage.toFixed(2)} kWh
-            </p>
-            <p>
-              <strong>Self Consumed:</strong> Solar Generation - Export ={' '}
-              {stats.totalSolar.toFixed(2)} - {stats.totalExport.toFixed(2)} ={' '}
-              {(stats.totalSolar - stats.totalExport).toFixed(2)} kWh
-            </p>
-            <p>
-              <strong>Total Consumption:</strong> Import + Self Consumed ={' '}
-              {stats.totalImport.toFixed(2)} +{' '}
-              {(stats.totalSolar - stats.totalExport).toFixed(2)} ={' '}
-              {stats.totalConsumption.toFixed(2)} kWh
-            </p>
-          </div>
+        {/* Chart 1: Daily Solar */}
+        <div className="mb-10">
+          <SolarChart data={dailyChartData} />
         </div>
+
+        {/* Chart 2: Daily Import vs Export */}
+        <div className="mb-12">
+          <ImportExportChart data={dailyChartData} />
+        </div>
+
       </div>
     </div>
   )
