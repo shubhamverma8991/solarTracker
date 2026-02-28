@@ -15,11 +15,13 @@ type Stats = {
   totalExport: number
   netUsage: number
   totalConsumption: number
+  billingUnit: number
 }
 
 async function getStats(startDate: string, endDate: string) {
   const supabase = createServerClient()
 
+  // Base reading
   const { data: baseReading } = await supabase
     .from('base_readings')
     .select('*')
@@ -32,6 +34,7 @@ async function getStats(startDate: string, endDate: string) {
     smart_meter_imported: 0,
   }
 
+  // Range rows
   const { data: rangeRows } = await supabase
     .from('daily_readings')
     .select('*')
@@ -41,13 +44,13 @@ async function getStats(startDate: string, endDate: string) {
 
   const rows = rangeRows ?? []
 
-  // ✅ Solar total (daily sum)
+  // ✅ Total Solar (sum of daily inverter)
   const totalSolar = rows.reduce(
     (acc, r) => acc + Number(r.solar_inverter_reading ?? 0),
     0
   )
 
-  // ✅ Cumulative difference logic (for totals)
+  // Get last reading in selected range
   const { data: lastReading } = await supabase
     .from('daily_readings')
     .select('*')
@@ -64,11 +67,13 @@ async function getStats(startDate: string, endDate: string) {
         totalExport: 0,
         netUsage: 0,
         totalConsumption: 0,
+        billingUnit: 0,
       },
       dailyChartData: [],
     }
   }
 
+  // Previous reading before start date
   const { data: previousReading } = await supabase
     .from('daily_readings')
     .select('*')
@@ -79,6 +84,7 @@ async function getStats(startDate: string, endDate: string) {
 
   const reference = previousReading ?? base
 
+  // Range import/export difference
   const totalExport =
     Number(lastReading.smart_meter_export ?? 0) -
     Number(reference.smart_meter_export ?? 0)
@@ -94,34 +100,42 @@ async function getStats(startDate: string, endDate: string) {
   const selfConsumed = Math.max(0, totalSolar - safeExport)
   const totalConsumption = safeImport + selfConsumed
 
-  // ✅ Convert cumulative → daily delta (FOR CHARTS)
+  // 🔥 BILLING UNIT (actual meter reading difference)
+  const finalImportReading = Number(lastReading.smart_meter_imported ?? 0)
+  const finalExportReading = Number(lastReading.smart_meter_export ?? 0)
+
+  const billingUnit = Math.max(
+    0,
+    finalImportReading - finalExportReading
+  )
+
+  // ✅ Convert cumulative → daily delta (for charts)
   const dailyChartData = rows.map((row, index) => {
     const prev = index === 0 ? null : rows[index - 1]
 
     const dailyImport = prev
       ? Number(row.smart_meter_imported) -
-      Number(prev.smart_meter_imported)
+        Number(prev.smart_meter_imported)
       : 0
 
     const dailyExport = prev
       ? Number(row.smart_meter_export) -
-      Number(prev.smart_meter_export)
+        Number(prev.smart_meter_export)
       : 0
 
     const solar = Number(row.solar_inverter_reading ?? 0)
 
-    const safeImport = Math.max(0, dailyImport)
-    const safeExport = Math.max(0, dailyExport)
+    const safeImportDaily = Math.max(0, dailyImport)
+    const safeExportDaily = Math.max(0, dailyExport)
 
-    const selfConsumed = Math.max(0, solar - safeExport)
-
-    const used = safeImport + selfConsumed
+    const selfConsumedDaily = Math.max(0, solar - safeExportDaily)
+    const used = safeImportDaily + selfConsumedDaily
 
     return {
       date: row.date.slice(5),
       solar,
-      import: safeImport,
-      export: safeExport,
+      import: safeImportDaily,
+      export: safeExportDaily,
       used,
     }
   })
@@ -133,6 +147,7 @@ async function getStats(startDate: string, endDate: string) {
       totalExport: Number(safeExport.toFixed(2)),
       netUsage: Number(netUsage.toFixed(2)),
       totalConsumption: Number(totalConsumption.toFixed(2)),
+      billingUnit: Number(billingUnit.toFixed(2)),
     },
     dailyChartData,
   }
@@ -165,8 +180,9 @@ export default async function DashboardPage({
     { title: 'Solar', value: stats.totalSolar, icon: '☀️' },
     { title: 'Import', value: stats.totalImport, icon: '⬇️' },
     { title: 'Export', value: stats.totalExport, icon: '⬆️' },
-    { title: 'Net', value: stats.netUsage, icon: '📊' },
+    { title: 'Approx Bill Value', value: stats.netUsage, icon: '📊' },
     { title: 'Consumption', value: stats.totalConsumption, icon: '🔌' },
+    { title: 'Bill Unit', value: stats.billingUnit, icon: '🧾' },
   ]
 
   return (
@@ -190,7 +206,10 @@ export default async function DashboardPage({
         {/* Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
           {cards.map((card) => (
-            <div key={card.title} className="p-6 rounded-lg border bg-gray-800 border-gray-700">
+            <div
+              key={card.title}
+              className="p-6 rounded-lg border bg-gray-800 border-gray-700"
+            >
               <div className="flex justify-between mb-3">
                 <h2>{card.title}</h2>
                 <span>{card.icon}</span>
@@ -207,7 +226,7 @@ export default async function DashboardPage({
           <SolarChart data={dailyChartData} />
         </div>
 
-        {/* Chart 2: Daily Import vs Export */}
+        {/* Chart 2: Import vs Export vs Used */}
         <div className="mb-12">
           <ImportExportChart data={dailyChartData} />
         </div>
